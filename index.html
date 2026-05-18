@@ -651,21 +651,32 @@
     return sp;
   }
 
-  function addDrop(x, y, sizeMul = 1) {
+  // speed in px/ms (0 = still, ~1.5 = very fast swipe)
+  // pressure: 0..1 (PointerEvent.pressure; 0.5 if device doesn't report)
+  function addDrop(x, y, sizeMul = 1, speed = 0, pressure = 0.5) {
+    // Slow / still finger → big lush bloom (1.5x).
+    // Fast swipe → thin streak (0.4x).
+    const sFactor = Math.max(0.40, 1.55 - speed * 0.85);
+    // Pressure deviation from baseline 0.5 scales the bloom up to ±60%.
+    const pFactor = 0.6 + Math.min(1, Math.max(0, pressure)) * 0.8;
+    const finalMul = sizeMul * sFactor * pFactor;
+
     const color = pickColor(theme.palette);
-    const N = Math.round(theme.pCount * sizeMul);
-    const baseSpeed = theme.pSpeed * SCALE;
+    const N = Math.max(8, Math.round(theme.pCount * finalMul));
+    // Faster finger → particles fly out a bit faster (motion smear), but
+    // ringe much narrower because count + size are down.
+    const baseSpeed = theme.pSpeed * SCALE * (0.75 + speed * 0.35);
     const maxLife = theme.pLifeMs * (0.85 + Math.random() * 0.3);
-    // central core: a few slow-moving, slightly larger particles (anchor of the bloom)
-    const coreCount = Math.max(4, Math.round(N * 0.10));
+    const coreCount = Math.max(3, Math.round(N * 0.10));
+    // Particle size scales mildly with finalMul too — slow bloom = chunkier
+    const pSizeBase = theme.pSize * (0.78 + finalMul * 0.20);
     for (let i = 0; i < N; i++) {
       const isCore = i < coreCount;
       const ang = Math.random() * Math.PI * 2;
-      // power-3 distribution gives more particles near the rim, fewer near center
       const sp = isCore
         ? baseSpeed * 0.15 * (0.4 + Math.random() * 0.5)
         : baseSpeed * (0.35 + Math.pow(Math.random(), 1.3) * 0.9);
-      const size = (theme.pSize * (isCore ? 1.5 : 0.7) + Math.random() * theme.pSize * 0.7) * SCALE;
+      const size = (pSizeBase * (isCore ? 1.5 : 0.7) + Math.random() * pSizeBase * 0.7) * SCALE;
       particles.push({
         x: x + (Math.random() - 0.5) * 4 * SCALE,
         y: y + (Math.random() - 0.5) * 4 * SCALE,
@@ -831,8 +842,8 @@
     setTimeout(scheduleAmbientBreath, (rise + hold + fall + silent) * 1000);
   }
 
-  // Per-theme drop SFX
-  function playDropSfx() {
+  // Per-theme drop SFX. Speed/pressure modulate amplitude + brightness.
+  function playDropSfx(speed = 0, pressure = 0.5) {
     if (!actx || actx.state !== 'running') return;
     const now = performance.now();
     if (now - lastSfx < 60) return;
@@ -842,6 +853,8 @@
     try {
       const t = actx.currentTime;
       const [pitch] = pickFromScale(1);
+      // Slow + heavy pressure → louder, fuller drop. Fast / light → softer tick.
+      const intensity = Math.max(0.3, 1.3 - speed * 0.6) * (0.6 + pressure * 0.8);
       if (themeName === 'oil') {
         // resonant drip plop — sine drop tone, falling pitch + brief noise tail
         const o = actx.createOscillator(); o.type = 'sine';
@@ -849,7 +862,7 @@
         o.frequency.exponentialRampToValueAtTime(pitch * 0.55, t + 0.18);
         const g = actx.createGain(); g.gain.value = 0;
         g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.16, t + 0.005);
+        g.gain.linearRampToValueAtTime(0.16 * intensity, t + 0.005);
         g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
         o.connect(g); g.connect(master);
         o.start(t); o.stop(t + 0.34);
@@ -871,7 +884,7 @@
         lp.frequency.value = 800 + Math.random() * 400;
         const gN = actx.createGain(); gN.gain.value = 0;
         gN.gain.setValueAtTime(0, t);
-        gN.gain.linearRampToValueAtTime(0.06, t + 0.015);
+        gN.gain.linearRampToValueAtTime(0.06 * intensity, t + 0.015);
         gN.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
         src.connect(lp); lp.connect(gN); gN.connect(master);
         src.start(t, Math.random() * 1.5); src.stop(t + 0.40);
@@ -890,7 +903,7 @@
         o.frequency.value = pitch;
         const g = actx.createGain(); g.gain.value = 0;
         g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.12, t + 0.004);
+        g.gain.linearRampToValueAtTime(0.12 * intensity, t + 0.004);
         g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
         o.connect(g); g.connect(master);
         o.start(t); o.stop(t + 0.48);
@@ -913,17 +926,19 @@
   let pointerActive = false;
   let lastMoveTime = 0;
   let lastDropTime = 0;
+  let lastMoveX = 0, lastMoveY = 0;
+  let lastDropX = 0, lastDropY = 0;
   function getXY(e) {
     const r = pool.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
-  function tryDrop(x, y, isDemo) {
-    addDrop(x, y);
+  function tryDrop(x, y, isDemo, speed = 0, pressure = 0.5) {
+    addDrop(x, y, 1, speed, pressure);
     if (!isDemo) {
       lifetime += 1;
       pendingScore += 1;
     }
-    playDropSfx();
+    playDropSfx(speed, pressure);
     bumpCount();
   }
   function onDown(e) {
@@ -938,9 +953,13 @@
     }
     initAudio();
     if (actx && actx.state !== 'running') { try { actx.resume(); } catch (_) {} }
-    tryDrop(x, y, false);
-    lastDropTime = performance.now();
-    lastMoveTime = performance.now();
+    const pressure = (e.pressure != null && e.pressure > 0) ? e.pressure : 0.5;
+    tryDrop(x, y, false, 0, pressure);
+    const now = performance.now();
+    lastDropTime = now;
+    lastMoveTime = now;
+    lastMoveX = x; lastMoveY = y;
+    lastDropX = x; lastDropY = y;
   }
   function onMove(e) {
     if (!pointerActive) return;
@@ -948,11 +967,23 @@
     const { x, y } = getXY(e);
     const now = performance.now();
     if (now - lastMoveTime < 14) return;
+    const dt = Math.max(1, now - lastMoveTime);
+    const speed = Math.hypot(x - lastMoveX, y - lastMoveY) / dt;   // px/ms
+    lastMoveX = x; lastMoveY = y;
     lastMoveTime = now;
-    // every ~120ms of drag, drop another bead (so dragging paints a trail)
-    if (now - lastDropTime > 120) {
-      lastDropTime = now;
-      tryDrop(x, y, false);
+    // Drop pacing adapts to speed:
+    //   slow / nearly still → 200ms interval (each drop gets time to bloom big)
+    //   fast swipe → 70ms interval (more, but thinner drops)
+    const dropInterval = Math.max(70, 200 - speed * 110);
+    if (now - lastDropTime > dropInterval) {
+      // also gate by minimum spatial distance so fast swipes don't stack on top of themselves
+      const distSinceLast = Math.hypot(x - lastDropX, y - lastDropY);
+      if (distSinceLast > 6 * SCALE || speed < 0.15) {
+        lastDropTime = now;
+        lastDropX = x; lastDropY = y;
+        const pressure = (e.pressure != null && e.pressure > 0) ? e.pressure : 0.5;
+        tryDrop(x, y, false, speed, pressure);
+      }
     }
   }
   function onUp() {
