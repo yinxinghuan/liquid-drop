@@ -189,6 +189,47 @@
     50%      { opacity: 1; }
   }
 
+  /* Tilt/shake hint — appears after first touch when sensors are active.
+     Same visual treatment as Murmuration's ghost finger: an icon that
+     animates the gesture (here a swinging phone), plus a pulsing label. */
+  .tilt-hint {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+    z-index: 27; pointer-events: none;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  .tilt-hint.show { opacity: 1; }
+  .tilt-hint__icon {
+    width: 64px; height: 64px;
+    animation: ld-tilt-swing 1.6s ease-in-out infinite;
+    transform-origin: 50% 60%;
+  }
+  .tilt-hint__icon svg {
+    width: 100%; height: 100%;
+    fill: rgba(30, 32, 44, 0.92);
+    filter:
+      drop-shadow(0 0 5px rgba(255, 255, 255, 0.95))
+      drop-shadow(0 0 1px rgba(255, 255, 255, 0.95))
+      drop-shadow(0 2px 3px rgba(0, 0, 0, 0.30));
+  }
+  .tilt-hint__label {
+    margin-top: 22px;
+    font-size: 11px; letter-spacing: 0.36em; text-transform: uppercase;
+    color: rgba(30, 30, 42, 0.90);
+    text-shadow:
+      0 0 4px rgba(255, 255, 255, 0.95),
+      0 0 10px rgba(255, 255, 255, 0.65),
+      0 1px 2px rgba(0, 0, 0, 0.20);
+    animation: ld-hint-pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes ld-tilt-swing {
+    0%   { transform: rotate(-18deg); }
+    50%  { transform: rotate(18deg); }
+    100% { transform: rotate(-18deg); }
+  }
+
   /* Leaderboard styles (shared) */
   .gg-lb-backdrop {
     position: absolute; inset: 0; z-index: 200;
@@ -302,6 +343,14 @@
         <path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.92-1.38z"/>
       </svg>
     </div>
+  </div>
+
+  <!-- After-first-touch hint: tilt the device. Material Icons "screen_rotation". -->
+  <div class="tilt-hint" id="tiltHint">
+    <div class="tilt-hint__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81 1.33-1.32zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02-6.36 6.36zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05C.56 19.16 5.71 24 12 24l.66-.03-3.81-3.81-1.33 1.32z"/></svg>
+    </div>
+    <div class="tilt-hint__label">Tilt to stir</div>
   </div>
 
 <script>
@@ -500,6 +549,9 @@
   const countEl  = document.getElementById('count');
   const themeStrip = document.getElementById('themeStrip');
   const wipeHintEl = document.getElementById('wipeHint');
+  const tiltHintEl = document.getElementById('tiltHint');
+  let tiltHintShown = false;
+  let tiltHintHidden = false;
 
   let W = 0, H = 0, DPR = 1, SCALE = 1;
   let lifetime = 0;
@@ -1003,6 +1055,22 @@
       countEl.style.display = '';
       countEl.textContent = formatScore(lifetime);
       if (wipeHintEl) wipeHintEl.classList.add('gone');
+      // 0.9s later: introduce the tilt hint. Sensors started in tryStartSensors
+      // (called below in this onDown). If the device doesn't support sensors,
+      // the hint is harmless — it auto-fades after 7s anyway.
+      setTimeout(() => {
+        if (tiltHintEl && !tiltHintHidden && sensorsStarted) {
+          tiltHintEl.classList.add('show');
+          tiltHintShown = true;
+          // hard fade after 7s even if user never tilts
+          setTimeout(() => {
+            if (tiltHintEl && !tiltHintHidden) {
+              tiltHintEl.classList.remove('show');
+              tiltHintHidden = true;
+            }
+          }, 7000);
+        }
+      }, 900);
     }
     initAudio();
     if (actx && actx.state !== 'running') { try { actx.resume(); } catch (_) {} }
@@ -1101,6 +1169,16 @@
     updateParticles(dt);
     drawParticles(poolCtx);
     maybeSave(dt);
+
+    // Dismiss the tilt hint once the user has actually tilted the phone.
+    if (tiltHintShown && !tiltHintHidden) {
+      // Phone resting flat = gravity along z; any meaningful tilt shows up
+      // in x or y. Sum-of-squares > 16 ≈ 4 m/s² combined sideways tilt.
+      if (gravX * gravX + gravY * gravY > 16) {
+        tiltHintEl.classList.remove('show');
+        tiltHintHidden = true;
+      }
+    }
 
     raf = requestAnimationFrame(frame);
   }
@@ -1217,6 +1295,7 @@
     document.querySelector('.theme-strip').style.display = 'none';
     document.querySelector('.watermark').style.display = 'none';
     if (wipeHintEl) wipeHintEl.style.display = 'none';
+    if (tiltHintEl) tiltHintEl.style.display = 'none';
     document.getElementById('posterOverlay').style.display = 'block';
     // Pre-seed clouds for the poster. Keep them below the title region.
     const cy = H * 0.72;
