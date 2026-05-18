@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="icon" type="image/gif" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" />
+<title>Liquid Drop</title>
+<style>
+  :root { --bg: #060810; --accent: #ffd9a8; }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg);
+    color: #fff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+    overflow: hidden; touch-action: none;
+    overscroll-behavior: none;
+  }
+  body { overflow: hidden; position: relative; transition: background 0.6s ease; }
+  canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  #bg     { z-index: 1; background: var(--bg); }
+  #pool   { z-index: 2; }
+
+  .hud-bottom {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    z-index: 20; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 16px 22px;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    text-align: center;
+  }
+  .hud-bottom .title {
+    font-size: 11px; letter-spacing: 0.42em; text-transform: uppercase;
+    color: rgba(255,255,255,0.65);
+    text-shadow: 0 1px 8px rgba(0,0,0,0.55);
+  }
+  .hud-bottom .count {
+    margin-top: 6px;
+    font-size: 36px; font-weight: 700; line-height: 1;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.45), 0 0 24px rgba(255,255,255,0.18);
+    transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .hud-bottom .count.pop { transform: scale(1.1); }
+  .hud-bottom .lb-btn {
+    margin-top: 12px;
+    width: 34px; height: 34px;
+    background: rgba(0,0,0,0.32);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 50%; color: #fff;
+    font-size: 16px; line-height: 1; padding: 0;
+    cursor: pointer; pointer-events: auto;
+    display: flex; align-items: center; justify-content: center;
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.15s ease;
+  }
+  .hud-bottom .lb-btn:active { transform: scale(0.9); }
+
+  /* Top theme strip — iconified chips */
+  .theme-strip {
+    position: absolute; left: 0; right: 0;
+    top: calc(14px + env(safe-area-inset-top));
+    z-index: 30; pointer-events: none;
+    display: flex; justify-content: center;
+  }
+  .theme-strip__inner {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 6px;
+    max-width: calc(100% - 24px);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .theme-strip__inner::-webkit-scrollbar { display: none; }
+  .theme-chip {
+    flex: 0 0 auto;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.92);
+    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.32);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0.78;
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.22s ease,
+                background 0.22s ease,
+                border-color 0.22s ease,
+                box-shadow 0.22s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .theme-chip svg {
+    width: 18px; height: 18px;
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.96);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 1px 1.2px rgba(0, 0, 0, 0.55));
+    transition: stroke 0.22s ease, fill 0.22s ease;
+  }
+  .theme-chip svg .filled {
+    fill: rgba(255, 255, 255, 0.96);
+    stroke: none;
+  }
+  .theme-chip.active {
+    opacity: 1;
+    transform: scale(1.13);
+    background: rgba(18, 20, 28, 0.94);
+    border-color: rgba(255, 255, 255, 1);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.18);
+  }
+  .theme-chip.active svg { stroke: #ffffff; }
+  .theme-chip.active svg .filled { fill: #ffffff; }
+
+  /* AlterU watermark — top right */
+  .watermark {
+    position: absolute; right: 14px; top: 14px;
+    padding-top: env(safe-area-inset-top);
+    z-index: 25;
+    width: 52px; height: auto; opacity: 0.40;
+    pointer-events: none;
+  }
+  .watermark img { width: 100%; display: block; }
+
+  /* Intro hint */
+  .wipe-hint {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+    z-index: 28; pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  .wipe-hint.gone { opacity: 0; }
+  .ghost-finger {
+    position: absolute;
+    width: 56px; height: 56px;
+    transform-origin: 50% 30%;
+    will-change: transform, opacity;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+  .ghost-finger.show { opacity: 1; }
+  .ghost-finger svg {
+    width: 100%; height: 100%;
+    fill: rgba(30, 32, 44, 0.92);
+    filter:
+      drop-shadow(0 0 5px rgba(255, 255, 255, 0.95))
+      drop-shadow(0 0 1px rgba(255, 255, 255, 0.95))
+      drop-shadow(0 2px 3px rgba(0, 0, 0, 0.30));
+  }
+  .wipe-hint__label {
+    position: absolute;
+    left: 50%; bottom: 30%;
+    transform: translateX(-50%);
+    font-size: 11px; letter-spacing: 0.36em; text-transform: uppercase;
+    color: rgba(30, 30, 42, 0.90);
+    text-shadow:
+      0 0 4px rgba(255, 255, 255, 0.95),
+      0 0 10px rgba(255, 255, 255, 0.65),
+      0 1px 2px rgba(0, 0, 0, 0.20);
+    animation: ld-hint-pulse 2.4s ease-in-out infinite;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    white-space: nowrap;
+  }
+  .wipe-hint__label.show { opacity: 1; }
+  @keyframes ld-hint-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+
+  /* Leaderboard styles (shared) */
+  .gg-lb-backdrop {
+    position: absolute; inset: 0; z-index: 200;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.72);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .gg-lb-backdrop.show { display: flex; }
+  .gg-lb-panel {
+    width: min(92%, 400px); max-height: 80vh;
+    display: flex; flex-direction: column; gap: 12px;
+    background: rgba(14, 16, 26, 0.97);
+    border: 1px solid rgba(255, 217, 168, 0.16);
+    border-radius: 20px; padding: 18px 14px 14px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+    color: #fff; font-family: inherit;
+  }
+  .gg-lb-head { display: flex; align-items: center; gap: 10px; }
+  .gg-lb-head__icon { font-size: 24px; }
+  .gg-lb-head__title { font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: rgba(255,255,255,0.55); }
+  .gg-lb-head__game { font-size: 14px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 2px; }
+  .gg-lb-close {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: rgba(255,255,255,0.08); border: none; color: #fff;
+    font-size: 13px; cursor: pointer; font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .gg-lb-tabs { display: flex; gap: 6px; background: rgba(255,255,255,0.04); border-radius: 10px; padding: 4px; }
+  .gg-lb-tab {
+    flex: 1; padding: 8px 10px; border-radius: 8px; border: none;
+    background: transparent; color: rgba(255,255,255,0.6);
+    font-family: inherit; font-size: 12px; letter-spacing: 0.04em; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .gg-lb-tab.active { background: rgba(255, 217, 168, 0.18); color: #fff; }
+  .gg-lb-body { flex: 1; overflow-y: auto; min-height: 200px; -webkit-overflow-scrolling: touch; }
+  .gg-lb-state { padding: 48px 12px; text-align: center; color: rgba(255,255,255,0.45); font-size: 13px; }
+  .gg-lb-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; margin-bottom: 4px; border: 1px solid transparent; }
+  .gg-lb-row.top { background: rgba(255,255,255,0.04); }
+  .gg-lb-row.me  { background: rgba(255, 217, 168, 0.16); border-color: rgba(255, 217, 168, 0.4); }
+  .gg-lb-row.clickable { cursor: pointer; }
+  .gg-lb-rank { width: 26px; text-align: center; font-weight: 700; font-size: 14px; color: rgba(255,255,255,0.45); }
+  .gg-lb-rank.medal { font-size: 20px; }
+  .gg-lb-av { background: rgba(255,255,255,0.08); border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,0.6); flex-shrink: 0; }
+  .gg-lb-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gg-lb-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+  .gg-lb-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+  .gg-lb-mebadge { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: rgba(255, 217, 168, 0.28); color: var(--accent); }
+  .gg-lb-score { font-weight: 700; font-size: 16px; color: #fff; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <canvas id="bg"></canvas>
+  <canvas id="pool"></canvas>
+
+  <div class="theme-strip" id="themeStrip">
+    <div class="theme-strip__inner">
+      <div class="theme-chip active" data-t="oil" aria-label="Oil & Water">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <!-- water drop -->
+          <path class="filled" d="M12 3 C9 8, 6 11, 6 15 a6 6 0 0 0 12 0 C18 11, 15 8, 12 3 Z" />
+          <circle cx="10" cy="13" r="1.6" fill="rgba(0,0,0,0.45)" stroke="none" />
+        </svg>
+      </div>
+      <div class="theme-chip" data-t="milk" aria-label="Milk & Coffee">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <!-- yin-yang swirl: two interlocking half circles -->
+          <path d="M12 3 a9 9 0 0 1 0 18 a4.5 4.5 0 0 1 0 -9 a4.5 4.5 0 0 0 0 -9 Z" />
+          <circle cx="12" cy="7.5" r="1.2" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="16.5" r="1.2" fill="rgba(255,255,255,0)" stroke="currentColor" />
+        </svg>
+      </div>
+      <div class="theme-chip" data-t="acrylic" aria-label="Acrylic Bloom">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <!-- 3 overlapping circles (color mixing) -->
+          <circle cx="9.5" cy="10" r="5" />
+          <circle cx="14.5" cy="10" r="5" />
+          <circle cx="12" cy="15" r="5" />
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="hud-bottom">
+    <div class="title">Liquid Drop</div>
+    <div class="count" id="count" style="display:none">0</div>
+    <button type="button" class="lb-btn" id="lbToggleBtn" aria-label="Leaderboard">🏆</button>
+  </div>
+
+  <div class="watermark"><img src="img/aigram.svg" alt="" draggable="false" /></div>
+
+  <!-- Posterer overlay -->
+  <div id="posterOverlay" style="display:none; position:absolute; left:0; right:0; top:0;
+       z-index:50; pointer-events:none; text-align:center; padding-top:80px;">
+    <div style="font-size:14px; letter-spacing:0.45em; color:rgba(255,255,255,0.7);
+         text-transform:uppercase; text-shadow:0 2px 12px rgba(0,0,0,0.6);">A L T E R U</div>
+    <div style="margin-top:18px; font-size:88px; font-weight:800; letter-spacing:0.02em;
+         color:#fff; text-shadow:0 4px 24px rgba(0,0,0,0.65), 0 0 28px rgba(255,255,255,0.18);
+         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">LIQUID<br/>DROP</div>
+    <div style="margin-top:22px; font-size:18px; letter-spacing:0.3em;
+         color:rgba(255,255,255,0.75); text-transform:uppercase;
+         text-shadow:0 2px 10px rgba(0,0,0,0.6);">tap to bloom</div>
+  </div>
+
+  <!-- First-time hint: ghost finger taps -->
+  <div class="wipe-hint" id="wipeHint">
+    <div class="wipe-hint__label" id="wipeHintLabel">Tap to bloom</div>
+    <div class="ghost-finger" id="ghostFinger">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.92-1.38z"/>
+      </svg>
+    </div>
+  </div>
+
+<script>
+/* ========================================================================
+   Leaderboard module — lifetime drop count
+   ======================================================================== */
+(function () {
+  'use strict';
+  const GAMES_API = 'https://games-api.xinghuan-yin.workers.dev';
+  const GAME_ID   = 'liquid-drop';
+  const GAME_NAME = 'LIQUID DROP';
+
+  const params     = new URLSearchParams(window.location.search);
+  const telegramId = params.get('telegram_id') || null;
+  const rawOrigin  = params.get('api_origin');
+  const apiOrigin  = rawOrigin ? decodeURIComponent(rawOrigin) : null;
+  const isInAigram = !!(telegramId && apiOrigin);
+
+  let currentUser = null;
+  const toBase64   = s => btoa(unescape(encodeURIComponent(s)));
+  const fromBase64 = s => decodeURIComponent(escape(atob(s)));
+
+  function callAigramAPI(url) {
+    return new Promise((resolve, reject) => {
+      const id = (crypto.randomUUID && crypto.randomUUID()) || (Date.now() + '-' + Math.random());
+      const target = new URL(apiOrigin).origin;
+      let timer;
+      const handler = (e) => {
+        if (e.origin !== target) return;
+        const msg = typeof e.data === 'string' ? e.data : '';
+        if (!msg.startsWith('callAPIResult-')) return;
+        try {
+          const r = JSON.parse(fromBase64(msg.slice('callAPIResult-'.length)));
+          if (r.request_id !== id) return;
+          window.removeEventListener('message', handler);
+          clearTimeout(timer);
+          if (r.success) resolve(r.data); else reject(new Error(r.error || 'API error'));
+        } catch (_) {}
+      };
+      window.addEventListener('message', handler);
+      window.parent.postMessage(
+        `callAPI-${toBase64(JSON.stringify({ url, method: 'GET', data: null, request_id: id, emitter: window.location.origin }))}`,
+        target
+      );
+      timer = setTimeout(() => { window.removeEventListener('message', handler); reject(new Error('timeout')); }, 10000);
+    });
+  }
+  if (isInAigram) {
+    callAigramAPI(`/note/telegram/user/get/info/by/telegram_id?telegram_id=${telegramId}`)
+      .then(res => { currentUser = (res && res.data) ? res.data : res; })
+      .catch(() => {});
+  }
+  async function submitScore(score) {
+    if (!telegramId || !(score > 0)) return;
+    try {
+      await fetch(`${GAMES_API}/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          game_id: GAME_ID, telegram_id: telegramId,
+          name: (currentUser && currentUser.name) || telegramId,
+          avatar_url: (currentUser && currentUser.head_url) || '',
+          score: Math.floor(score),
+        }),
+      });
+    } catch (_) {}
+  }
+  async function fetchGlobal() {
+    try {
+      const res = await fetch(`${GAMES_API}/leaderboard?game_id=${GAME_ID}&limit=50`);
+      const json = await res.json();
+      return (json.leaderboard || []).map(e => Object.assign({}, e, { isMe: String(e.telegram_id) === String(telegramId) }));
+    } catch (_) { return []; }
+  }
+  async function fetchFriends() {
+    if (!isInAigram) return [];
+    const ids = new Set([String(telegramId)]);
+    try {
+      const contacts = await callAigramAPI(`/note/telegram/user/contact/list?telegram_id=${telegramId}`);
+      const list = Array.isArray(contacts) ? contacts : (contacts && contacts.data) || [];
+      list.forEach(f => { if (f && f.telegram_id) ids.add(String(f.telegram_id)); });
+    } catch (_) {}
+    try {
+      const res = await fetch(`${GAMES_API}/leaderboard?game_id=${GAME_ID}&telegram_ids=${encodeURIComponent([...ids].join(','))}`);
+      const json = await res.json();
+      return (json.leaderboard || []).map(e => Object.assign({}, e, { isMe: String(e.telegram_id) === String(telegramId) }));
+    } catch (_) { return []; }
+  }
+  function openProfile(tid) {
+    if (!apiOrigin) return;
+    try {
+      const enc = btoa(JSON.stringify({ id: tid }));
+      window.parent.postMessage(`AW.PROFILE.OPEN-${enc}`, new URL(apiOrigin).origin);
+    } catch (_) {}
+  }
+  const zh = (navigator.language || '').toLowerCase().startsWith('zh');
+  const S = zh
+    ? { title:'排行榜', global:'🌍 全局榜', friends:'👥 好友榜', me:'我',
+        empty:'还没有人滴过这个池子。', emptyFriends:'好友还没人玩过。', loading:'加载中…' }
+    : { title:'Leaderboard', global:'🌍 Global', friends:'👥 Friends', me:'me',
+        empty:'No one has dropped here yet.', emptyFriends:'No friends on the board yet.', loading:'Loading…' };
+  const MEDALS = ['🥇','🥈','🥉'];
+  const MEDAL_COLORS = ['#FFD700','#C0C0C0','#CD7F32'];
+  let root, body;
+  const tabs = {};
+  let currentTab = 'global';
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function build() {
+    if (root) return;
+    root = document.createElement('div'); root.className = 'gg-lb-backdrop';
+    root.addEventListener('pointerdown', e => { if (e.target === root) hide(); });
+    const panel = document.createElement('div'); panel.className = 'gg-lb-panel'; root.appendChild(panel);
+    const head = document.createElement('div'); head.className = 'gg-lb-head';
+    head.innerHTML = '<span class="gg-lb-head__icon">🏆</span>' +
+      '<div style="flex:1; min-width:0">' +
+        `<div class="gg-lb-head__title">${esc(S.title)}</div>` +
+        `<div class="gg-lb-head__game">${esc(GAME_NAME)}</div></div>` +
+      '<button type="button" class="gg-lb-close">✕</button>';
+    panel.appendChild(head);
+    head.querySelector('.gg-lb-close').addEventListener('pointerdown', hide);
+    if (isInAigram) {
+      const tabRow = document.createElement('div'); tabRow.className = 'gg-lb-tabs';
+      ['global','friends'].forEach(key => {
+        const b = document.createElement('button'); b.type = 'button';
+        b.className = 'gg-lb-tab' + (key === 'global' ? ' active' : '');
+        b.textContent = key === 'global' ? S.global : S.friends;
+        b.addEventListener('pointerdown', () => {
+          if (currentTab !== key) { currentTab = key; updateTabs(); refresh(); }
+        });
+        tabRow.appendChild(b); tabs[key] = b;
+      });
+      panel.appendChild(tabRow);
+    }
+    body = document.createElement('div'); body.className = 'gg-lb-body'; panel.appendChild(body);
+    document.body.appendChild(root);
+  }
+  function updateTabs() { Object.keys(tabs).forEach(k => tabs[k].classList.toggle('active', k === currentTab)); }
+  function render(entries) {
+    if (!body) return;
+    body.innerHTML = '';
+    if (!entries.length) {
+      const empty = document.createElement('div'); empty.className = 'gg-lb-state';
+      empty.textContent = currentTab === 'friends' ? S.emptyFriends : S.empty;
+      body.appendChild(empty); return;
+    }
+    entries.forEach((e, i) => {
+      const row = document.createElement('div'); const top = i < 3;
+      row.className = 'gg-lb-row' + (top ? ' top' : '') + (e.isMe ? ' me' : '') + (isInAigram ? ' clickable' : '');
+      if (isInAigram) row.addEventListener('pointerdown', () => openProfile(e.telegram_id));
+      const rank = document.createElement('div');
+      if (top) { rank.className = 'gg-lb-rank medal'; rank.textContent = MEDALS[i]; rank.style.color = MEDAL_COLORS[i]; }
+      else { rank.className = 'gg-lb-rank'; rank.textContent = String(i + 1); }
+      row.appendChild(rank);
+      const sz = top ? 40 : 34;
+      const av = document.createElement('div'); av.className = 'gg-lb-av';
+      av.style.width = sz + 'px'; av.style.height = sz + 'px'; av.style.fontSize = Math.round(sz * 0.4) + 'px';
+      if (e.avatar_url) {
+        const img = document.createElement('img'); img.src = e.avatar_url; img.alt = e.name || ''; img.draggable = false;
+        img.onerror = () => { av.innerHTML = ''; av.textContent = (e.name || '?').charAt(0).toUpperCase(); };
+        av.appendChild(img);
+      } else { av.textContent = (e.name || '?').charAt(0).toUpperCase(); }
+      row.appendChild(av);
+      const info = document.createElement('div'); info.className = 'gg-lb-info';
+      info.innerHTML = `<span class="gg-lb-name">${esc(e.name || '')}</span>` + (e.isMe ? `<span class="gg-lb-mebadge">${esc(S.me)}</span>` : '');
+      row.appendChild(info);
+      const sc = document.createElement('span'); sc.className = 'gg-lb-score';
+      sc.textContent = Number(e.score || 0).toLocaleString('en-US');
+      row.appendChild(sc);
+      body.appendChild(row);
+    });
+  }
+  async function refresh() {
+    body.innerHTML = `<div class="gg-lb-state">${esc(S.loading)}</div>`;
+    const data = currentTab === 'friends' ? await fetchFriends() : await fetchGlobal();
+    render(data);
+  }
+  function show() { build(); currentTab = 'global'; updateTabs(); root.classList.add('show'); refresh(); }
+  function hide() { if (root) root.classList.remove('show'); }
+  const tbtn = document.getElementById('lbToggleBtn');
+  if (tbtn) tbtn.addEventListener('pointerdown', show);
+  window.GG_LB = { isInAigram, submitScore, show, hide };
+})();
+</script>
+
+<script>
+/* ========================================================================
+   Liquid Drop — tap to drop a colored liquid that blooms across a pool
+   ======================================================================== */
+(() => {
+  'use strict';
+
+  const bg     = document.getElementById('bg');
+  const pool   = document.getElementById('pool');
+  const bgCtx    = bg.getContext('2d');
+  const poolCtx  = pool.getContext('2d');
+  const countEl  = document.getElementById('count');
+  const themeStrip = document.getElementById('themeStrip');
+  const wipeHintEl = document.getElementById('wipeHint');
+
+  let W = 0, H = 0, DPR = 1, SCALE = 1;
+  let lifetime = 0;
+  let pendingScore = 0;
+  let firstTouch = false;
+  const isPoster = new URLSearchParams(window.location.search).get('poster') === '1';
+
+  /* ---------- themes ---------- */
+  const THEMES = {
+    oil: {
+      label: 'Oil & Water',
+      bodyBg: '#040614',
+      palette: ['#ffd24a', '#39d8ff', '#ff39c2', '#a0ff3e', '#ff8030', '#b048ff'],
+      blendMode: 'source-over',
+      paintBg: paintDeepPool,
+      rMaxBase: 100,
+      growMs: 700,
+      lifeMs: 12000,
+      ambient: 'submarine',
+      style: 'oil',
+    },
+    milk: {
+      label: 'Milk & Coffee',
+      bodyBg: '#1a0a04',
+      palette: ['#fffaf0', '#fff0d6', '#fff5dd', '#ffe8c0', '#fff8e2'],
+      blendMode: 'screen',
+      paintBg: paintCoffeeCup,
+      rMaxBase: 130,
+      growMs: 1100,
+      lifeMs: 14000,
+      ambient: 'steam',
+      style: 'milk',
+    },
+    acrylic: {
+      label: 'Acrylic Bloom',
+      bodyBg: '#070708',
+      palette: ['#ff3b6b', '#ff8e3c', '#ffd03c', '#3cff8e', '#3cd8ff', '#9a3cff', '#ff5fbf'],
+      blendMode: 'lighter',
+      paintBg: paintBlackCanvas,
+      rMaxBase: 90,
+      growMs: 500,
+      lifeMs: 10000,
+      ambient: 'pad-warm',
+      style: 'acrylic',
+    },
+  };
+  let theme = THEMES.oil;
+  let themeName = 'oil';
+
+  /* ============ BACKGROUNDS ============ */
+  function paintDeepPool(c, w, h) {
+    // Inky deep water pool with subtle radial brightening
+    const g = c.createRadialGradient(w*0.5, h*0.5, 0, w*0.5, h*0.5, Math.max(w, h) * 0.75);
+    g.addColorStop(0,    '#0c1626');
+    g.addColorStop(0.5,  '#070d18');
+    g.addColorStop(1,    '#03060c');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    // very faint wave streaks
+    c.strokeStyle = 'rgba(80, 110, 150, 0.10)';
+    c.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const y = (i + 0.5) * h / 6;
+      c.beginPath();
+      c.moveTo(0, y);
+      for (let x = 0; x <= w; x += 12) {
+        c.lineTo(x, y + Math.sin(x * 0.03 + i) * 2);
+      }
+      c.stroke();
+    }
+  }
+
+  function paintCoffeeCup(c, w, h) {
+    // Top-down warm coffee surface
+    const g = c.createRadialGradient(w*0.5, h*0.45, 0, w*0.5, h*0.5, Math.max(w, h) * 0.7);
+    g.addColorStop(0,    '#5e3318');
+    g.addColorStop(0.4,  '#3e220e');
+    g.addColorStop(0.85, '#241208');
+    g.addColorStop(1,    '#100804');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    // crema speckle
+    c.fillStyle = 'rgba(200, 140, 80, 0.08)';
+    for (let i = 0; i < 60; i++) {
+      const x = ((i * 173) % w);
+      const y = ((i * 91) % h);
+      const r = 1 + ((i * 7) % 6);
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI*2); c.fill();
+    }
+    // faint cup rim hint (subtle inner ring at the edges)
+    const ring = c.createRadialGradient(w*0.5, h*0.5, Math.min(w, h)*0.42, w*0.5, h*0.5, Math.min(w, h)*0.55);
+    ring.addColorStop(0, 'rgba(0,0,0,0)');
+    ring.addColorStop(0.5, 'rgba(0,0,0,0.25)');
+    ring.addColorStop(1, 'rgba(0,0,0,0.6)');
+    c.fillStyle = ring; c.fillRect(0, 0, w, h);
+  }
+
+  function paintBlackCanvas(c, w, h) {
+    // Almost pure black canvas with subtle paper texture
+    c.fillStyle = '#070708';
+    c.fillRect(0, 0, w, h);
+    c.fillStyle = 'rgba(255,255,255,0.012)';
+    for (let i = 0; i < 1200; i++) {
+      const x = ((i * 137) % w);
+      const y = ((i * 71) % h);
+      c.fillRect(x, y, 1, 1);
+    }
+  }
+
+  /* ============ DROPS ============ */
+  const drops = [];
+  const MAX_DROPS = 90;
+
+  function pickColor(palette) {
+    return palette[Math.floor(Math.random() * palette.length)];
+  }
+
+  function hexToRgba(hex, a) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  function addDrop(x, y, sizeMul = 1) {
+    const variance = 0.7 + Math.random() * 0.6;
+    drops.push({
+      x, y,
+      r: 4 * SCALE,                              // current radius
+      rMax: theme.rMaxBase * SCALE * variance * sizeMul,
+      grow: 1,
+      age: 0,
+      growEnd: theme.growMs,
+      maxLife: theme.lifeMs * (0.85 + Math.random() * 0.3),
+      color: pickColor(theme.palette),
+      // slight drift like real liquid
+      vx: (Math.random() - 0.5) * 0.18 * SCALE,
+      vy: (Math.random() - 0.5) * 0.18 * SCALE,
+      seed: Math.random() * 1000,
+    });
+    if (drops.length > MAX_DROPS) drops.shift();
+  }
+
+  function updateDrops(dt) {
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      d.age += dt;
+      if (d.age < d.growEnd) {
+        // ease-out growth
+        const f = d.age / d.growEnd;
+        const ease = 1 - Math.pow(1 - f, 2.2);
+        d.r = 4 * SCALE + (d.rMax - 4 * SCALE) * ease;
+      } else {
+        d.r = d.rMax;
+      }
+      d.x += d.vx; d.y += d.vy;
+      d.vx *= 0.985; d.vy *= 0.985;
+      if (d.age > d.maxLife) drops.splice(i, 1);
+    }
+  }
+
+  function dropAlpha(d) {
+    if (d.age < 250) return d.age / 250;
+    const fadeStart = d.maxLife * 0.7;
+    if (d.age < fadeStart) return 1;
+    return Math.max(0, 1 - (d.age - fadeStart) / (d.maxLife - fadeStart));
+  }
+
+  function drawDrops(c) {
+    c.clearRect(0, 0, W, H);
+    const style = theme.style;
+    c.save();
+    c.globalCompositeOperation = theme.blendMode;
+    for (const d of drops) {
+      const a = dropAlpha(d);
+      if (a <= 0) continue;
+      if (style === 'oil') {
+        // Oil: bright center, vivid edge, slight glossy highlight
+        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
+        grad.addColorStop(0,    hexToRgba(d.color, a * 0.95));
+        grad.addColorStop(0.50, hexToRgba(d.color, a * 0.88));
+        grad.addColorStop(0.88, hexToRgba(d.color, a * 0.55));
+        grad.addColorStop(1,    hexToRgba(d.color, 0));
+        c.fillStyle = grad;
+        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+        // glossy highlight (top-left, smaller as drop grows)
+        const hr = d.r * 0.22;
+        c.fillStyle = `rgba(255,255,255,${a * 0.4})`;
+        c.beginPath();
+        c.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, hr, 0, Math.PI * 2);
+        c.fill();
+      } else if (style === 'milk') {
+        // Milk: soft cream bloom with concentric rings, rendered with screen
+        // blend so cream visibly lightens the coffee underneath
+        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
+        grad.addColorStop(0,    hexToRgba(d.color, a * 0.95));
+        grad.addColorStop(0.35, hexToRgba(d.color, a * 0.78));
+        grad.addColorStop(0.78, hexToRgba(d.color, a * 0.32));
+        grad.addColorStop(1,    hexToRgba(d.color, 0));
+        c.fillStyle = grad;
+        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+        // soft halo ring (the "crema" boundary)
+        c.strokeStyle = hexToRgba(d.color, a * 0.55);
+        c.lineWidth = 1.6;
+        c.beginPath(); c.arc(d.x, d.y, d.r * 0.78, 0, Math.PI * 2); c.stroke();
+      } else {
+        // Acrylic: vivid + soft edge, blends with 'lighter' for overlapping colors
+        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
+        grad.addColorStop(0,    hexToRgba(d.color, a * 0.88));
+        grad.addColorStop(0.55, hexToRgba(d.color, a * 0.65));
+        grad.addColorStop(1,    hexToRgba(d.color, 0));
+        c.fillStyle = grad;
+        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+      }
+    }
+    c.restore();
+  }
+
+  /* ============ AUDIO ============ */
+  let actx = null, master = null, ambientStarted = false;
+  let noiseBuf = null;
+  let lastSfx = 0;
+  let voicesAlive = 0;
+
+  // Pentatonic scales per theme
+  const SCALES = {
+    oil:     [196, 233.08, 261.63, 293.66, 349.23, 392, 466.16, 523.25, 587.33, 698.46],     // G-minor pentatonic
+    milk:    [261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.26, 783.99, 880],         // C major
+    acrylic: [349.23, 392, 440, 523.25, 587.33, 698.46, 783.99, 880, 1046.5, 1174.66],        // F-major / brighter
+  };
+  function pickFromScale(n) {
+    const scale = SCALES[themeName] || SCALES.oil;
+    const out = [];
+    const used = new Set();
+    while (out.length < n && used.size < scale.length) {
+      const idx = Math.floor(Math.random() * scale.length);
+      if (used.has(idx)) continue;
+      used.add(idx);
+      out.push(scale[idx]);
+    }
+    return out.sort((a, b) => a - b);
+  }
+
+  function initAudio() {
+    if (actx) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      actx = new Ctx();
+      master = actx.createGain();
+      master.gain.value = 0.5;
+      master.connect(actx.destination);
+
+      const len = actx.sampleRate * 2;
+      noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
+      for (let i = 0; i < len; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        ch[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
+      }
+      setTimeout(() => { if (!ambientStarted && actx) { startAmbient(); ambientStarted = true; } }, 600);
+    } catch (_) { actx = null; }
+  }
+
+  let ambientNodes = null;
+  function startAmbient() { rebuildAmbient(); scheduleAmbientBreath(); }
+  function rebuildAmbient() {
+    if (!actx) return;
+    if (ambientNodes) { try { ambientNodes.disconnect(); } catch (_) {} ambientNodes = null; }
+    const g = actx.createGain(); g.gain.value = 0; g.connect(master);
+    if (theme.ambient === 'submarine') {
+      const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+      const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 50;
+      src.connect(hp); hp.connect(lp); lp.connect(g);
+      const o = actx.createOscillator(); o.type = 'sine'; o.frequency.value = 55;
+      const og = actx.createGain(); og.gain.value = 0.4; o.connect(og); og.connect(g);
+      src.start(); o.start();
+      ambientNodes = { g, src, o, _peak: 0.20 };
+    } else if (theme.ambient === 'steam') {
+      const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 3;
+      src.connect(bp); bp.connect(g);
+      src.start();
+      ambientNodes = { g, src, _peak: 0.10 };
+    } else {
+      // pad-warm
+      const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 165;
+      const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 220;
+      const o3 = actx.createOscillator(); o3.type = 'sine'; o3.frequency.value = 330.5;
+      const mix = actx.createGain(); mix.gain.value = 0.35;
+      o1.connect(mix); o2.connect(mix); o3.connect(mix);
+      const filt = actx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 900;
+      mix.connect(filt); filt.connect(g);
+      o1.start(); o2.start(); o3.start();
+      ambientNodes = { g, o1, o2, o3, _peak: 0.17 };
+    }
+  }
+  function scheduleAmbientBreath() {
+    if (!actx || !ambientNodes) return;
+    const t0 = actx.currentTime;
+    const rise = 5 + Math.random() * 3;
+    const hold = 8 + Math.random() * 8;
+    const fall = 6 + Math.random() * 4;
+    const silent = 7 + Math.random() * 9;
+    const peak = ambientNodes._peak;
+    const g = ambientNodes.g.gain;
+    try {
+      g.cancelScheduledValues(t0);
+      g.setValueAtTime(g.value, t0);
+      g.linearRampToValueAtTime(peak, t0 + rise);
+      g.linearRampToValueAtTime(peak, t0 + rise + hold);
+      g.linearRampToValueAtTime(0,    t0 + rise + hold + fall);
+    } catch (_) {}
+    setTimeout(scheduleAmbientBreath, (rise + hold + fall + silent) * 1000);
+  }
+
+  // Per-theme drop SFX
+  function playDropSfx() {
+    if (!actx || actx.state !== 'running') return;
+    const now = performance.now();
+    if (now - lastSfx < 60) return;
+    if (voicesAlive >= 6) return;
+    lastSfx = now;
+    voicesAlive++;
+    try {
+      const t = actx.currentTime;
+      const [pitch] = pickFromScale(1);
+      if (themeName === 'oil') {
+        // resonant drip plop — sine drop tone, falling pitch + brief noise tail
+        const o = actx.createOscillator(); o.type = 'sine';
+        o.frequency.setValueAtTime(pitch * 1.3, t);
+        o.frequency.exponentialRampToValueAtTime(pitch * 0.55, t + 0.18);
+        const g = actx.createGain(); g.gain.value = 0;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.16, t + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+        o.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 0.34);
+        // tiny splash burst
+        const src = actx.createBufferSource(); src.buffer = noiseBuf;
+        const bp = actx.createBiquadFilter(); bp.type = 'bandpass';
+        bp.frequency.value = 1800 + Math.random() * 800; bp.Q.value = 4;
+        const gN = actx.createGain(); gN.gain.value = 0;
+        gN.gain.setValueAtTime(0, t);
+        gN.gain.linearRampToValueAtTime(0.04, t + 0.008);
+        gN.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+        src.connect(bp); bp.connect(gN); gN.connect(master);
+        src.start(t, Math.random() * 1.5); src.stop(t + 0.14);
+        o.onended = () => { voicesAlive = Math.max(0, voicesAlive - 1); };
+      } else if (themeName === 'milk') {
+        // soft pour — short low-pass noise + warm sine tail
+        const src = actx.createBufferSource(); src.buffer = noiseBuf;
+        const lp = actx.createBiquadFilter(); lp.type = 'lowpass';
+        lp.frequency.value = 800 + Math.random() * 400;
+        const gN = actx.createGain(); gN.gain.value = 0;
+        gN.gain.setValueAtTime(0, t);
+        gN.gain.linearRampToValueAtTime(0.06, t + 0.015);
+        gN.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+        src.connect(lp); lp.connect(gN); gN.connect(master);
+        src.start(t, Math.random() * 1.5); src.stop(t + 0.40);
+        const o = actx.createOscillator(); o.type = 'sine';
+        o.frequency.value = pitch * 0.6;
+        const gO = actx.createGain(); gO.gain.value = 0;
+        gO.gain.setValueAtTime(0, t);
+        gO.gain.linearRampToValueAtTime(0.05, t + 0.02);
+        gO.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+        o.connect(gO); gO.connect(master);
+        o.start(t); o.stop(t + 0.55);
+        src.onended = () => { voicesAlive = Math.max(0, voicesAlive - 1); };
+      } else {
+        // acrylic — sharp "blip" + bright bell layer for paint splat
+        const o = actx.createOscillator(); o.type = 'triangle';
+        o.frequency.value = pitch;
+        const g = actx.createGain(); g.gain.value = 0;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.12, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+        o.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 0.48);
+        // brief noise tick
+        const src = actx.createBufferSource(); src.buffer = noiseBuf;
+        const bp = actx.createBiquadFilter(); bp.type = 'bandpass';
+        bp.frequency.value = 3000 + Math.random() * 1500; bp.Q.value = 6;
+        const gN = actx.createGain(); gN.gain.value = 0;
+        gN.gain.setValueAtTime(0, t);
+        gN.gain.linearRampToValueAtTime(0.035, t + 0.005);
+        gN.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+        src.connect(bp); bp.connect(gN); gN.connect(master);
+        src.start(t, Math.random() * 1.5); src.stop(t + 0.10);
+        o.onended = () => { voicesAlive = Math.max(0, voicesAlive - 1); };
+      }
+    } catch (_) { voicesAlive = Math.max(0, voicesAlive - 1); }
+  }
+
+  /* ============ POINTER ============ */
+  let pointerActive = false;
+  let lastMoveTime = 0;
+  let lastDropTime = 0;
+  function getXY(e) {
+    const r = pool.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function tryDrop(x, y, isDemo) {
+    addDrop(x, y);
+    if (!isDemo) {
+      lifetime += 1;
+      pendingScore += 1;
+    }
+    playDropSfx();
+    bumpCount();
+  }
+  function onDown(e) {
+    e.preventDefault();
+    const { x, y } = getXY(e);
+    pointerActive = true;
+    if (!firstTouch) {
+      firstTouch = true;
+      countEl.style.display = '';
+      countEl.textContent = formatScore(lifetime);
+      if (wipeHintEl) wipeHintEl.classList.add('gone');
+    }
+    initAudio();
+    if (actx && actx.state !== 'running') { try { actx.resume(); } catch (_) {} }
+    tryDrop(x, y, false);
+    lastDropTime = performance.now();
+    lastMoveTime = performance.now();
+  }
+  function onMove(e) {
+    if (!pointerActive) return;
+    e.preventDefault();
+    const { x, y } = getXY(e);
+    const now = performance.now();
+    if (now - lastMoveTime < 14) return;
+    lastMoveTime = now;
+    // every ~120ms of drag, drop another bead (so dragging paints a trail)
+    if (now - lastDropTime > 120) {
+      lastDropTime = now;
+      tryDrop(x, y, false);
+    }
+  }
+  function onUp() {
+    pointerActive = false;
+    flushScore();
+  }
+
+  function bumpCount() {
+    if (firstTouch) {
+      countEl.textContent = formatScore(lifetime);
+      countEl.classList.add('pop');
+      setTimeout(() => countEl.classList.remove('pop'), 160);
+    }
+  }
+  function formatScore(n) { return Math.floor(n).toLocaleString('en-US'); }
+
+  /* ---------- persistence ---------- */
+  const STORAGE_KEY = 'liquid_drop_lifetime_v1';
+  function loadLifetime() {
+    try {
+      const v = parseFloat(localStorage.getItem(STORAGE_KEY) || '0');
+      if (Number.isFinite(v) && v > 0) lifetime = v;
+    } catch (_) {}
+  }
+  function saveLifetime() {
+    try { localStorage.setItem(STORAGE_KEY, String(Math.floor(lifetime))); } catch (_) {}
+  }
+  let saveAcc = 0;
+  function maybeSave(dtMs) {
+    saveAcc += dtMs;
+    if (saveAcc > 1500 && pendingScore > 0) {
+      saveAcc = 0;
+      saveLifetime();
+      if (pendingScore >= 5) {
+        pendingScore = 0;
+        if (window.GG_LB && window.GG_LB.submitScore) window.GG_LB.submitScore(Math.floor(lifetime));
+      }
+    }
+  }
+  function flushScore() {
+    if (pendingScore <= 0) return;
+    saveLifetime();
+    if (window.GG_LB && window.GG_LB.submitScore) window.GG_LB.submitScore(Math.floor(lifetime));
+    pendingScore = 0;
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushScore(); });
+  window.addEventListener('pagehide', flushScore);
+
+  /* ============ MAIN LOOP ============ */
+  let lastT = 0, raf = 0;
+  const FRAME_MS = 1000 / 60;
+  let cachedBg = null;
+
+  function frame(t) {
+    if (!lastT) lastT = t;
+    const dt = Math.min(64, t - lastT);
+    if (dt < FRAME_MS - 1) { raf = requestAnimationFrame(frame); return; }
+    lastT = t;
+
+    if (cachedBg) { bgCtx.clearRect(0, 0, W, H); bgCtx.drawImage(cachedBg, 0, 0, W, H); }
+    updateDrops(dt);
+    drawDrops(poolCtx);
+    maybeSave(dt);
+
+    raf = requestAnimationFrame(frame);
+  }
+
+  /* ============ THEME SWITCH ============ */
+  function applyTheme(name) {
+    if (!THEMES[name]) return;
+    themeName = name;
+    theme = THEMES[name];
+    document.body.style.background = theme.bodyBg;
+    cachedBg = document.createElement('canvas');
+    cachedBg.width = W; cachedBg.height = H;
+    theme.paintBg(cachedBg.getContext('2d'), W, H);
+    themeStrip.querySelectorAll('.theme-chip').forEach(d => {
+      d.classList.toggle('active', d.dataset.t === name);
+    });
+    if (ambientStarted) { rebuildAmbient(); scheduleAmbientBreath(); }
+    try { localStorage.setItem('liquid_drop_theme', name); } catch (_) {}
+  }
+
+  themeStrip.addEventListener('pointerdown', e => {
+    const chip = e.target.closest('.theme-chip');
+    if (!chip) return;
+    const t = chip.dataset.t;
+    if (t && t !== themeName) {
+      initAudio();
+      if (actx && actx.state !== 'running') { try { actx.resume(); } catch (_) {} }
+      applyTheme(t);
+      chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  });
+
+  /* ============ RESIZE ============ */
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    SCALE = Math.min(w, h) / 400;
+    W = w; H = h;
+    [bg, pool].forEach(cv => {
+      cv.style.width = w + 'px';
+      cv.style.height = h + 'px';
+      cv.width = Math.floor(w * DPR);
+      cv.height = Math.floor(h * DPR);
+      cv.getContext('2d').setTransform(DPR, 0, 0, DPR, 0, 0);
+    });
+    cachedBg = document.createElement('canvas');
+    cachedBg.width = W; cachedBg.height = H;
+    theme.paintBg(cachedBg.getContext('2d'), W, H);
+  }
+  window.addEventListener('resize', resize);
+
+  /* ============ INTRO DEMO ============ */
+  function runIntroDemo() {
+    if (firstTouch) return;
+    const ghost = document.getElementById('ghostFinger');
+    const label = document.getElementById('wipeHintLabel');
+    if (!ghost) return;
+    const TX_OFF = 28, TY_OFF = 17;
+    function placeGhost(x, y, rot = 0) {
+      ghost.style.transform = `translate(${x - TX_OFF}px, ${y - TY_OFF}px) rotate(${rot}deg)`;
+    }
+    // Tour: ghost moves to a few preset positions and "drops" at each
+    const cx = W * 0.5, cy = H * 0.5;
+    const r = Math.min(W, H) * 0.18;
+    const stops = [
+      { x: cx,         y: cy        },
+      { x: cx + r,     y: cy + r*0.4 },
+      { x: cx - r*0.7, y: cy - r    },
+      { x: cx + r*0.5, y: cy - r*0.6 },
+      { x: cx - r*0.4, y: cy + r*0.7 },
+    ];
+    let idx = 0;
+    placeGhost(stops[0].x, stops[0].y, 0);
+    requestAnimationFrame(() => ghost.classList.add('show'));
+
+    function step() {
+      if (firstTouch) return;
+      const s = stops[idx % stops.length];
+      placeGhost(s.x, s.y, 0);
+      // do a soft demo drop (doesn't count for score)
+      addDrop(s.x, s.y);
+      // pulse ghost briefly
+      ghost.animate(
+        [{ transform: ghost.style.transform + ' scale(1)' },
+         { transform: ghost.style.transform + ' scale(0.86)' },
+         { transform: ghost.style.transform + ' scale(1)' }],
+        { duration: 380, easing: 'cubic-bezier(0.16,1,0.3,1)' }
+      );
+      label.classList.add('show');
+      idx++;
+      setTimeout(step, 1000);
+    }
+    setTimeout(step, 500);
+  }
+
+  /* ============ INIT ============ */
+  loadLifetime();
+  resize();
+  const urlTheme = new URLSearchParams(window.location.search).get('theme');
+  let saved = null;
+  try { saved = localStorage.getItem('liquid_drop_theme'); } catch (_) {}
+  const startTheme = (urlTheme && THEMES[urlTheme]) ? urlTheme
+                    : (saved && THEMES[saved]) ? saved
+                    : 'oil';
+  applyTheme(startTheme);
+
+  if (lifetime > 0) {
+    countEl.style.display = '';
+    countEl.textContent = formatScore(lifetime);
+  }
+  if (isPoster) {
+    document.querySelector('.hud-bottom').style.display = 'none';
+    document.querySelector('.theme-strip').style.display = 'none';
+    document.querySelector('.watermark').style.display = 'none';
+    if (wipeHintEl) wipeHintEl.style.display = 'none';
+    document.getElementById('posterOverlay').style.display = 'block';
+    // Pre-seed drops for the poster — fully grown immediately so the
+    // composition reads instantly when chrome takes the screenshot.
+    // Keep drops below the title region.
+    const cy = H * 0.72;
+    for (let i = 0; i < 11; i++) {
+      const ang = (i / 11) * Math.PI * 2 + Math.random() * 0.6;
+      const rad = Math.min(W, H) * (0.08 + Math.random() * 0.18);
+      const dy = Math.abs(Math.sin(ang)) * 0.5 + 0.5;  // bias drops downward
+      addDrop(W*0.5 + Math.cos(ang) * rad, cy + Math.sin(ang) * rad * dy);
+    }
+    addDrop(W*0.5, cy, 1.3);
+    for (const d of drops) {
+      d.age = d.growEnd + 200;
+      d.r = d.rMax;
+    }
+  } else {
+    runIntroDemo();
+  }
+
+  pool.addEventListener('pointerdown', onDown);
+  pool.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+
+  raf = requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
