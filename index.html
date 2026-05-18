@@ -8,6 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="icon" type="image/gif" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" />
 <title>Liquid Drop</title>
+<!-- Telegram WebApp SDK: exposes Accelerometer / DeviceOrientation / Gyroscope inside Aigram.
+     Harmless if loaded outside Telegram (window.Telegram stays undefined). -->
+<script src="https://telegram.org/js/telegram-web-app.js?62"></script>
 <style>
   :root { --bg: #060810; --accent: #ffd9a8; }
   * {
@@ -614,6 +617,42 @@
     }
   }
 
+  /* ============ MOTION SENSORS (Telegram WebApp) ============
+     Inside Aigram (Telegram Mini App), standard DeviceMotion is blocked
+     but Telegram.WebApp.Accelerometer works. Outside Telegram, we just
+     stay sensor-less. Tilt = a slow gravity vector pulling particles
+     toward the low end of the screen; shake = a brief jitter burst. */
+  let gravX = 0, gravY = 0;        // low-passed gravity vector (m/s²)
+  let shakeBoost = 0;               // 0..1, decays each frame
+  let _prevAX = 0, _prevAY = 0, _prevAZ = 0;
+  let sensorsStarted = false;
+
+  function tryStartSensors() {
+    if (sensorsStarted) return;
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.Accelerometer) return;     // not in Telegram or pre-Bot-API-8.0 — skip
+    sensorsStarted = true;
+    try {
+      tg.Accelerometer.start({ refresh_rate: 50 }, () => {});
+      tg.onEvent('accelerometerChanged', () => {
+        const a = tg.Accelerometer;
+        if (a == null || a.x == null) return;
+        // Low-pass to extract gravity direction
+        gravX = gravX * 0.85 + a.x * 0.15;
+        gravY = gravY * 0.85 + a.y * 0.15;
+        // Detect shake via instantaneous delta of acceleration vector
+        const dx = a.x - _prevAX, dy = a.y - _prevAY, dz = a.z - _prevAZ;
+        const delta = Math.hypot(dx, dy, dz);
+        if (delta > 6) shakeBoost = Math.min(1, shakeBoost + delta * 0.04);
+        _prevAX = a.x; _prevAY = a.y; _prevAZ = a.z;
+      });
+      tg.onEvent('accelerometerFailed', () => {
+        // device doesn't support — silently disable sensor influence
+        gravX = 0; gravY = 0; shakeBoost = 0;
+      });
+    } catch (_) {}
+  }
+
   /* ============ PARTICLE CLOUD ============
      Each "drop" spawns a cloud of ~60-90 small particles that fly out
      from the tap point, decelerate, jitter, and slowly fade. Multiple
@@ -695,7 +734,19 @@
 
   function updateParticles(dt) {
     const drag = theme.pDrag;
-    const jitter = 0.08 * SCALE;
+    // Tilt → gravity vector. Accelerometer x ≈ +9.8 when phone is tilted
+    // so the right edge is down; we want particles to drift right in that
+    // case, so gx maps to +x. y is similar with portrait orientation: when
+    // phone tips its top edge away, accel.y ≈ -9.8 → particles drift up;
+    // we want them to drift toward the bottom which is the down direction,
+    // so we negate accel.y for screen gravity.
+    const gxPer = gravX * 0.0048 * SCALE;
+    const gyPer = -gravY * 0.0048 * SCALE;
+    const jitterBase = 0.08 * SCALE;
+    const jitter = jitterBase + shakeBoost * 1.4 * SCALE;
+    // shake decay
+    shakeBoost *= 0.94;
+    if (shakeBoost < 0.01) shakeBoost = 0;
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.life += dt;
@@ -703,7 +754,9 @@
       p.y += p.vy;
       p.vx *= drag;
       p.vy *= drag;
-      // small Brownian wobble so particles don't settle in a perfect ring
+      p.vx += gxPer;
+      p.vy += gyPer;
+      // Brownian wobble + shake amplification
       p.vx += (Math.random() - 0.5) * jitter;
       p.vy += (Math.random() - 0.5) * jitter;
       if (p.life > p.maxLife) particles.splice(i, 1);
@@ -953,6 +1006,7 @@
     }
     initAudio();
     if (actx && actx.state !== 'running') { try { actx.resume(); } catch (_) {} }
+    tryStartSensors();
     const pressure = (e.pressure != null && e.pressure > 0) ? e.pressure : 0.5;
     tryDrop(x, y, false, 0, pressure);
     const now = performance.now();
