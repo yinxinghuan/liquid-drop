@@ -205,6 +205,10 @@
     width: 64px; height: 64px;
     animation: ld-tilt-swing 1.6s ease-in-out infinite;
     transform-origin: 50% 60%;
+    /* The icon is also the iOS sensor-permission button. */
+    pointer-events: auto;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
   .tilt-hint__icon svg {
     width: 100%; height: 100%;
@@ -224,10 +228,14 @@
       0 1px 2px rgba(0, 0, 0, 0.20);
     animation: ld-hint-pulse 2.4s ease-in-out infinite;
   }
+  /* Combined rotate + side-shift "shake" — feels much more like a phone
+     being physically wiggled, not just an icon swinging on a pivot. */
   @keyframes ld-tilt-swing {
-    0%   { transform: rotate(-18deg); }
-    50%  { transform: rotate(18deg); }
-    100% { transform: rotate(-18deg); }
+    0%   { transform: rotate(-18deg) translateX(-3px); }
+    25%  { transform: rotate(-4deg)  translateX(1px);  }
+    50%  { transform: rotate(18deg)  translateX(3px);  }
+    75%  { transform: rotate(4deg)   translateX(-1px); }
+    100% { transform: rotate(-18deg) translateX(-3px); }
   }
 
   /* Leaderboard styles (shared) */
@@ -705,6 +713,58 @@
     } catch (_) {}
   }
 
+  // Standard DOM sensor path — used in iOS Safari / WKWebView / iOS-native-app
+  // embedded webviews, where the Telegram SDK is unavailable but standard
+  // DeviceOrientation/Motion is allowed *after* the user grants permission
+  // via the hint-icon click below.
+  let _domSensorsAttached = false;
+  function onDOMOrientation(e) {
+    // β = front/back tilt (deg, ±180), γ = left/right tilt (deg, ±90).
+    // Map to the same m/s²-ish gravity vector the game already uses (~9.8 = 1g).
+    const g = (e.gamma || 0);                       // -90..90
+    const b = (e.beta  || 0);                       // -180..180
+    const ax = (g / 45) * 9.8;                       // ~1g at 45° tilt
+    const ay = (b / 45) * 9.8;
+    gravX = gravX * 0.85 + ax * 0.15;
+    gravY = gravY * 0.85 + ay * 0.15;
+  }
+  function onDOMMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a) return;
+    const dx = (a.x || 0) - _prevAX, dy = (a.y || 0) - _prevAY, dz = (a.z || 0) - _prevAZ;
+    const delta = Math.hypot(dx, dy, dz);
+    if (delta > 6) shakeBoost = Math.min(1, shakeBoost + delta * 0.04);
+    _prevAX = a.x || 0; _prevAY = a.y || 0; _prevAZ = a.z || 0;
+  }
+  function attachDOMSensors() {
+    if (_domSensorsAttached) return;
+    _domSensorsAttached = true;
+    window.addEventListener('deviceorientation', onDOMOrientation, { passive: true });
+    window.addEventListener('devicemotion',     onDOMMotion,      { passive: true });
+  }
+
+  // Hint icon click = the user-gesture button iOS requires for sensor perms.
+  async function requestSensorPermission() {
+    // Telegram WebApp path is already wired up — nothing else to do.
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.initData) return true;
+    // iOS 13+ Safari / WKWebView / native-app webview: must call inside a
+    // user gesture (this click handler).
+    let granted = true;
+    const DO = (typeof DeviceOrientationEvent !== 'undefined') ? DeviceOrientationEvent : null;
+    const DM = (typeof DeviceMotionEvent !== 'undefined') ? DeviceMotionEvent : null;
+    if (DO && typeof DO.requestPermission === 'function') {
+      try { granted = (await DO.requestPermission()) === 'granted'; }
+      catch (e) { granted = false; }
+    }
+    if (DM && typeof DM.requestPermission === 'function') {
+      try { const r = await DM.requestPermission(); granted = granted && (r === 'granted'); }
+      catch (e) {}
+    }
+    if (granted) attachDOMSensors();
+    return granted;
+  }
+
   /* ============ PARTICLE CLOUD ============
      Each "drop" spawns a cloud of ~60-90 small particles that fly out
      from the tap point, decelerate, jitter, and slowly fade. Multiple
@@ -1059,7 +1119,11 @@
       // (called below in this onDown). If the device doesn't support sensors,
       // the hint is harmless — it auto-fades after 7s anyway.
       setTimeout(() => {
-        if (tiltHintEl && !tiltHintHidden && sensorsStarted) {
+        const iosNeedsPerm =
+          typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function';
+        const hasSensorPath = sensorsStarted || iosNeedsPerm;
+        if (tiltHintEl && !tiltHintHidden && hasSensorPath) {
           tiltHintEl.classList.add('show');
           tiltHintShown = true;
           // hard fade after 7s even if user never tilts
@@ -1316,6 +1380,21 @@
   pool.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onUp);
+
+  // Tilt-hint icon doubles as the iOS sensor-permission button.
+  const tiltHintIconEl = tiltHintEl && tiltHintEl.querySelector('.ghost-finger, .tilt-hint__icon');
+  // Actually the icon class is `.tilt-hint__icon` in our markup:
+  const ldTiltIcon = document.querySelector('#tiltHint .tilt-hint__icon');
+  if (ldTiltIcon) {
+    ldTiltIcon.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await requestSensorPermission();
+      if (tiltHintEl) {
+        tiltHintEl.classList.remove('show');
+        tiltHintHidden = true;
+      }
+    });
+  }
 
   raf = requestAnimationFrame(frame);
 })();
