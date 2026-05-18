@@ -512,9 +512,13 @@
       palette: ['#ffd24a', '#39d8ff', '#ff39c2', '#a0ff3e', '#ff8030', '#b048ff'],
       blendMode: 'source-over',
       paintBg: paintDeepPool,
-      rMaxBase: 100,
-      growMs: 700,
-      lifeMs: 12000,
+      // particle bloom settings
+      pCount: 70,
+      pSpread: 110,           // px the cloud spreads to over its life
+      pSize: 5,               // average sprite radius
+      pDrag: 0.948,
+      pSpeed: 2.6,            // initial outward speed in px/frame
+      pLifeMs: 11000,
       ambient: 'submarine',
       style: 'oil',
     },
@@ -524,9 +528,12 @@
       palette: ['#fffaf0', '#fff0d6', '#fff5dd', '#ffe8c0', '#fff8e2'],
       blendMode: 'screen',
       paintBg: paintCoffeeCup,
-      rMaxBase: 130,
-      growMs: 1100,
-      lifeMs: 14000,
+      pCount: 90,
+      pSpread: 150,
+      pSize: 6,
+      pDrag: 0.962,           // slower drag — milk diffuses smoothly
+      pSpeed: 1.9,
+      pLifeMs: 14000,
       ambient: 'steam',
       style: 'milk',
     },
@@ -536,9 +543,12 @@
       palette: ['#ff3b6b', '#ff8e3c', '#ffd03c', '#3cff8e', '#3cd8ff', '#9a3cff', '#ff5fbf'],
       blendMode: 'lighter',
       paintBg: paintBlackCanvas,
-      rMaxBase: 90,
-      growMs: 500,
-      lifeMs: 10000,
+      pCount: 60,
+      pSpread: 100,
+      pSize: 4.5,
+      pDrag: 0.945,
+      pSpeed: 3.0,
+      pLifeMs: 9500,
       ambient: 'pad-warm',
       style: 'acrylic',
     },
@@ -604,113 +614,113 @@
     }
   }
 
-  /* ============ DROPS ============ */
-  const drops = [];
-  const MAX_DROPS = 90;
+  /* ============ PARTICLE CLOUD ============
+     Each "drop" spawns a cloud of ~60-90 small particles that fly out
+     from the tap point, decelerate, jitter, and slowly fade. Multiple
+     overlapping particles produce the real "ink in water" diffusion
+     look instead of one hard radial gradient. */
+  const particles = [];
+  const MAX_PARTICLES = 3500;
 
-  function pickColor(palette) {
-    return palette[Math.floor(Math.random() * palette.length)];
-  }
+  function pickColor(palette) { return palette[Math.floor(Math.random() * palette.length)]; }
 
   function hexToRgba(hex, a) {
     const h = hex.replace('#', '');
-    const r = parseInt(h.substring(0, 2), 16);
-    const g = parseInt(h.substring(2, 4), 16);
-    const b = parseInt(h.substring(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${a})`;
+    return `rgba(${parseInt(h.substring(0,2),16)}, ${parseInt(h.substring(2,4),16)}, ${parseInt(h.substring(4,6),16)}, ${a})`;
+  }
+
+  // Sprite cache: one pre-baked radial-gradient blob per (color, size)
+  const spriteCache = new Map();
+  function getSprite(color, radiusPx) {
+    const key = color + '|' + radiusPx;
+    let sp = spriteCache.get(key);
+    if (sp) return sp;
+    const d = Math.ceil(radiusPx * 4) + 2;
+    sp = document.createElement('canvas');
+    sp.width = d; sp.height = d;
+    const sc = sp.getContext('2d');
+    const cx = d/2, cy = d/2;
+    const grad = sc.createRadialGradient(cx, cy, 0, cx, cy, radiusPx * 2);
+    grad.addColorStop(0,    hexToRgba(color, 0.85));
+    grad.addColorStop(0.4,  hexToRgba(color, 0.55));
+    grad.addColorStop(0.8,  hexToRgba(color, 0.15));
+    grad.addColorStop(1,    hexToRgba(color, 0));
+    sc.fillStyle = grad;
+    sc.beginPath(); sc.arc(cx, cy, radiusPx * 2, 0, Math.PI * 2); sc.fill();
+    spriteCache.set(key, sp);
+    return sp;
   }
 
   function addDrop(x, y, sizeMul = 1) {
-    const variance = 0.7 + Math.random() * 0.6;
-    drops.push({
-      x, y,
-      r: 4 * SCALE,                              // current radius
-      rMax: theme.rMaxBase * SCALE * variance * sizeMul,
-      grow: 1,
-      age: 0,
-      growEnd: theme.growMs,
-      maxLife: theme.lifeMs * (0.85 + Math.random() * 0.3),
-      color: pickColor(theme.palette),
-      // slight drift like real liquid
-      vx: (Math.random() - 0.5) * 0.18 * SCALE,
-      vy: (Math.random() - 0.5) * 0.18 * SCALE,
-      seed: Math.random() * 1000,
-    });
-    if (drops.length > MAX_DROPS) drops.shift();
-  }
-
-  function updateDrops(dt) {
-    for (let i = drops.length - 1; i >= 0; i--) {
-      const d = drops[i];
-      d.age += dt;
-      if (d.age < d.growEnd) {
-        // ease-out growth
-        const f = d.age / d.growEnd;
-        const ease = 1 - Math.pow(1 - f, 2.2);
-        d.r = 4 * SCALE + (d.rMax - 4 * SCALE) * ease;
-      } else {
-        d.r = d.rMax;
-      }
-      d.x += d.vx; d.y += d.vy;
-      d.vx *= 0.985; d.vy *= 0.985;
-      if (d.age > d.maxLife) drops.splice(i, 1);
+    const color = pickColor(theme.palette);
+    const N = Math.round(theme.pCount * sizeMul);
+    const baseSpeed = theme.pSpeed * SCALE;
+    const maxLife = theme.pLifeMs * (0.85 + Math.random() * 0.3);
+    // central core: a few slow-moving, slightly larger particles (anchor of the bloom)
+    const coreCount = Math.max(4, Math.round(N * 0.10));
+    for (let i = 0; i < N; i++) {
+      const isCore = i < coreCount;
+      const ang = Math.random() * Math.PI * 2;
+      // power-3 distribution gives more particles near the rim, fewer near center
+      const sp = isCore
+        ? baseSpeed * 0.15 * (0.4 + Math.random() * 0.5)
+        : baseSpeed * (0.35 + Math.pow(Math.random(), 1.3) * 0.9);
+      const size = (theme.pSize * (isCore ? 1.5 : 0.7) + Math.random() * theme.pSize * 0.7) * SCALE;
+      particles.push({
+        x: x + (Math.random() - 0.5) * 4 * SCALE,
+        y: y + (Math.random() - 0.5) * 4 * SCALE,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp,
+        r: size,
+        life: 0,
+        maxLife,
+        color,
+      });
+    }
+    if (particles.length > MAX_PARTICLES) {
+      particles.splice(0, particles.length - MAX_PARTICLES);
     }
   }
 
-  function dropAlpha(d) {
-    if (d.age < 250) return d.age / 250;
-    const fadeStart = d.maxLife * 0.7;
-    if (d.age < fadeStart) return 1;
-    return Math.max(0, 1 - (d.age - fadeStart) / (d.maxLife - fadeStart));
+  function updateParticles(dt) {
+    const drag = theme.pDrag;
+    const jitter = 0.08 * SCALE;
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life += dt;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= drag;
+      p.vy *= drag;
+      // small Brownian wobble so particles don't settle in a perfect ring
+      p.vx += (Math.random() - 0.5) * jitter;
+      p.vy += (Math.random() - 0.5) * jitter;
+      if (p.life > p.maxLife) particles.splice(i, 1);
+    }
   }
 
-  function drawDrops(c) {
+  function particleAlpha(p) {
+    if (p.life < 200) return p.life / 200;
+    const fadeStart = p.maxLife * 0.45;
+    if (p.life < fadeStart) return 1;
+    return Math.max(0, 1 - (p.life - fadeStart) / (p.maxLife - fadeStart));
+  }
+
+  function drawParticles(c) {
     c.clearRect(0, 0, W, H);
-    const style = theme.style;
     c.save();
     c.globalCompositeOperation = theme.blendMode;
-    for (const d of drops) {
-      const a = dropAlpha(d);
-      if (a <= 0) continue;
-      if (style === 'oil') {
-        // Oil: bright center, vivid edge, slight glossy highlight
-        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
-        grad.addColorStop(0,    hexToRgba(d.color, a * 0.95));
-        grad.addColorStop(0.50, hexToRgba(d.color, a * 0.88));
-        grad.addColorStop(0.88, hexToRgba(d.color, a * 0.55));
-        grad.addColorStop(1,    hexToRgba(d.color, 0));
-        c.fillStyle = grad;
-        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
-        // glossy highlight (top-left, smaller as drop grows)
-        const hr = d.r * 0.22;
-        c.fillStyle = `rgba(255,255,255,${a * 0.4})`;
-        c.beginPath();
-        c.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, hr, 0, Math.PI * 2);
-        c.fill();
-      } else if (style === 'milk') {
-        // Milk: soft cream bloom with concentric rings, rendered with screen
-        // blend so cream visibly lightens the coffee underneath
-        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
-        grad.addColorStop(0,    hexToRgba(d.color, a * 0.95));
-        grad.addColorStop(0.35, hexToRgba(d.color, a * 0.78));
-        grad.addColorStop(0.78, hexToRgba(d.color, a * 0.32));
-        grad.addColorStop(1,    hexToRgba(d.color, 0));
-        c.fillStyle = grad;
-        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
-        // soft halo ring (the "crema" boundary)
-        c.strokeStyle = hexToRgba(d.color, a * 0.55);
-        c.lineWidth = 1.6;
-        c.beginPath(); c.arc(d.x, d.y, d.r * 0.78, 0, Math.PI * 2); c.stroke();
-      } else {
-        // Acrylic: vivid + soft edge, blends with 'lighter' for overlapping colors
-        const grad = c.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
-        grad.addColorStop(0,    hexToRgba(d.color, a * 0.88));
-        grad.addColorStop(0.55, hexToRgba(d.color, a * 0.65));
-        grad.addColorStop(1,    hexToRgba(d.color, 0));
-        c.fillStyle = grad;
-        c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
-      }
+    for (const p of particles) {
+      const a = particleAlpha(p);
+      if (a <= 0.02) continue;
+      // round radius to nearest 0.5 step for sprite cache hit rate
+      const rKey = Math.max(1, Math.round(p.r * 2) / 2);
+      const sp = getSprite(p.color, rKey);
+      const d = sp.width;
+      c.globalAlpha = a;
+      c.drawImage(sp, p.x - d/2, p.y - d/2);
     }
+    c.globalAlpha = 1;
     c.restore();
   }
 
@@ -1003,8 +1013,8 @@
     lastT = t;
 
     if (cachedBg) { bgCtx.clearRect(0, 0, W, H); bgCtx.drawImage(cachedBg, 0, 0, W, H); }
-    updateDrops(dt);
-    drawDrops(poolCtx);
+    updateParticles(dt);
+    drawParticles(poolCtx);
     maybeSave(dt);
 
     raf = requestAnimationFrame(frame);
@@ -1123,21 +1133,17 @@
     document.querySelector('.watermark').style.display = 'none';
     if (wipeHintEl) wipeHintEl.style.display = 'none';
     document.getElementById('posterOverlay').style.display = 'block';
-    // Pre-seed drops for the poster — fully grown immediately so the
-    // composition reads instantly when chrome takes the screenshot.
-    // Keep drops below the title region.
+    // Pre-seed clouds for the poster. Keep them below the title region.
     const cy = H * 0.72;
-    for (let i = 0; i < 11; i++) {
-      const ang = (i / 11) * Math.PI * 2 + Math.random() * 0.6;
-      const rad = Math.min(W, H) * (0.08 + Math.random() * 0.18);
-      const dy = Math.abs(Math.sin(ang)) * 0.5 + 0.5;  // bias drops downward
-      addDrop(W*0.5 + Math.cos(ang) * rad, cy + Math.sin(ang) * rad * dy);
+    for (let i = 0; i < 9; i++) {
+      const ang = (i / 9) * Math.PI * 2 + Math.random() * 0.6;
+      const rad = Math.min(W, H) * (0.05 + Math.random() * 0.16);
+      addDrop(W*0.5 + Math.cos(ang) * rad, cy + Math.sin(ang) * rad);
     }
     addDrop(W*0.5, cy, 1.3);
-    for (const d of drops) {
-      d.age = d.growEnd + 200;
-      d.r = d.rMax;
-    }
+    // simulate ~1.2s of motion so clouds visibly bloom before screenshot
+    const PRE_FRAMES = 70;
+    for (let f = 0; f < PRE_FRAMES; f++) updateParticles(16);
   } else {
     runIntroDemo();
   }
